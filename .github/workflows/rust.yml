@@ -11,28 +11,42 @@ env:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
-
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        BUILD_TARGET: [release]
+    outputs:
+      release_built: ${{ steps.set-output.outputs.release_built }}
     steps:
-    - name: Setup sccache
-      if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-      uses: mozilla-actions/sccache-action@v0.0.6
-    - name: Configure sccache
-      if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-      run: |
-        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libfontconfig1-dev libgoogle-perftools-dev google-perftools
-    - uses: actions/checkout@v4
-    - name: Clippy
-      run: cargo clippy -- -D warnings
-    - name: Check fmt
-      run: cargo fmt -- --check
-    - name: Run tests
-      run: cargo test --benches -- adobe_example
-    - name: Build
-      run: cargo build
+      - uses: actions/checkout@v4
+      - name: Build binaries in "${{ matrix.BUILD_TARGET }}" mode
+        run: cargo build --profile ${{ matrix.BUILD_TARGET }}
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdf
+          path: target/${{ matrix.BUILD_TARGET }}/tdf
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tdf
+          path: ./tdf
+
+      - name: Get current commit hash
+        id: get_commit
+        run: |
+          echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "COMMIT_MESSAGE=$(git log -1 --pretty=%B)" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        id: release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.COMMIT_HASH }}
+          name: "Release based on ${{ env.COMMIT_HASH }}"
+          body: "${{ env.COMMIT_MESSAGE }}"
+          files: target/${{ matrix.BUILD_TARGET }}/tdf
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
